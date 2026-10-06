@@ -45,7 +45,11 @@ export default function AdminPage() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  const isAdmin = useMemo(() => !!email && !!adminEmail && email === adminEmail, [email, adminEmail]);
+  const isAdmin = useMemo(
+    () => !!email && !!adminEmail && email === adminEmail,
+    [email, adminEmail]
+  );
+
   const selectedEvent = useMemo(
     () => approved.find((e) => e.id === selectedEventId) ?? null,
     [approved, selectedEventId]
@@ -133,21 +137,17 @@ export default function AdminPage() {
     return new Uint8Array(await res.arrayBuffer());
   };
 
-  // IMPORTANT: This places NAME in the blank space under "presented to"
-  const generateCertificatePdf = async (templateBytes: Uint8Array, templateExt: string, payload: {
-    studentName: string;
-    regNo: string;
-    eventTitle: string;
-    eventDate: string;
-  }) => {
+  const generateCertificatePdf = async (
+    templateBytes: Uint8Array,
+    templateExt: string,
+    payload: { studentName: string; regNo: string; eventTitle: string; eventDate: string }
+  ) => {
     const pdfDoc = await PDFDocument.create();
 
-    let embeddedImg: any;
-    if (templateExt.toLowerCase().includes("jpg") || templateExt.toLowerCase().includes("jpeg")) {
-      embeddedImg = await pdfDoc.embedJpg(templateBytes);
-    } else {
-      embeddedImg = await pdfDoc.embedPng(templateBytes);
-    }
+    const embeddedImg =
+      templateExt.toLowerCase().includes("jpg") || templateExt.toLowerCase().includes("jpeg")
+        ? await pdfDoc.embedJpg(templateBytes)
+        : await pdfDoc.embedPng(templateBytes);
 
     const { width, height } = embeddedImg.scale(1);
     const page = pdfDoc.addPage([width, height]);
@@ -158,14 +158,11 @@ export default function AdminPage() {
 
     const nameText = payload.studentName.toUpperCase();
 
-    // These Y values are tuned for the template you sent (1024x768 style)
-    const nameY = height * 0.43;     // blank space line
-    const regY = height * 0.385;     // slightly below name
+    // Tune these if you want name higher/lower on your template
+    const nameY = height * 0.43;
+    const regY = height * 0.385;
 
-    // Gold-ish color
     const gold = rgb(0.88, 0.75, 0.42);
-
-    // Fit name to 80% width
     const maxWidth = width * 0.8;
     const baseSize = Math.min(46, Math.max(26, Math.round(width * 0.04)));
     const nameSize = fitFontSize(nameFont, nameText, maxWidth, baseSize);
@@ -173,28 +170,15 @@ export default function AdminPage() {
     const nameWidth = nameFont.widthOfTextAtSize(nameText, nameSize);
     const nameX = (width - nameWidth) / 2;
 
-    page.drawText(nameText, {
-      x: nameX,
-      y: nameY,
-      size: nameSize,
-      font: nameFont,
-      color: gold,
-    });
+    page.drawText(nameText, { x: nameX, y: nameY, size: nameSize, font: nameFont, color: gold });
 
     const regLine = `Reg No: ${payload.regNo}`;
     const regSize = Math.max(14, Math.round(width * 0.016));
     const regWidth = infoFont.widthOfTextAtSize(regLine, regSize);
     const regX = (width - regWidth) / 2;
 
-    page.drawText(regLine, {
-      x: regX,
-      y: regY,
-      size: regSize,
-      font: infoFont,
-      color: rgb(0.9, 0.9, 0.9),
-    });
+    page.drawText(regLine, { x: regX, y: regY, size: regSize, font: infoFont, color: rgb(0.9, 0.9, 0.9) });
 
-    // (Optional) event/date small text at bottom-left
     page.drawText(`${payload.eventTitle} • ${payload.eventDate}`, {
       x: width * 0.08,
       y: height * 0.08,
@@ -203,7 +187,7 @@ export default function AdminPage() {
       color: rgb(0.85, 0.85, 0.85),
     });
 
-    return await pdfDoc.save();
+    return await pdfDoc.save(); // Uint8Array
   };
 
   const generateAndUploadForStudent = async (r: RegRow) => {
@@ -213,6 +197,7 @@ export default function AdminPage() {
 
     const regNo = digitsOnly(r.reg_no);
     if (!regNo) throw new Error("Missing reg_no");
+
     const studentName = (r.student_name ?? "").trim();
     if (!studentName) throw new Error("Missing student_name");
 
@@ -231,11 +216,17 @@ export default function AdminPage() {
       eventDate,
     });
 
+    // ✅ FIX: Cast to ArrayBufferView so Blob constructor accepts it
+    const pdfBlob = new Blob([pdfBytes as unknown as ArrayBufferView], {
+      type: "application/pdf",
+    });
+
     const certPath = `${selectedEvent.id}/${regNo}.pdf`;
 
-    const upload = await supabase.storage
-      .from("certificates")
-      .upload(certPath, new Blob([pdfBytes], { type: "application/pdf" }), { upsert: true });
+    const upload = await supabase.storage.from("certificates").upload(certPath, pdfBlob, {
+      upsert: true,
+      contentType: "application/pdf",
+    });
 
     if (upload.error) throw new Error(upload.error.message);
 
@@ -260,7 +251,6 @@ export default function AdminPage() {
       return;
     }
 
-    // If marking Present => auto-generate certificate (if template exists)
     try {
       if (newValue && selectedEvent.certificate_template_path) {
         await generateAndUploadForStudent({ ...r, attendance: true });
@@ -282,12 +272,11 @@ export default function AdminPage() {
 
     const targets = regs.filter((r) => r.attendance && !r.certificate_path);
     if (targets.length === 0) {
-      alert("No pending certificates (all present students already have certificates).");
+      alert("No pending certificates.");
       return;
     }
 
     setBulkBusy(true);
-
     let ok = 0;
     const failed: string[] = [];
 
@@ -303,7 +292,7 @@ export default function AdminPage() {
     setBulkBusy(false);
     await loadRegistrations(selectedEvent.id);
 
-    alert(`Generated: ${ok}\nFailed: ${failed.length}\n\n${failed.slice(0, 10).join("\n")}`);
+    alert(`Generated: ${ok}\nFailed: ${failed.length}\n${failed.slice(0, 10).join("\n")}`);
   };
 
   if (loading) return <div className="notice">Loading...</div>;
@@ -322,36 +311,41 @@ export default function AdminPage() {
       <div className="hr" />
 
       <h2 style={{ margin: 0, fontWeight: 950 }}>Pending events</h2>
-      <div style={{ marginTop: 12 }}>
-        {pending.length === 0 ? (
-          <div className="notice">No pending events.</div>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Title</th>
-                  <th>Start</th>
-                  <th>End</th>
-                  <th style={{ width: 260 }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pending.map((e) => (
-                  <tr key={e.id}>
-                    <td style={{ fontWeight: 950 }}>{e.title}</td>
-                    <td className="p-muted">{e.start_time ? new Date(e.start_time).toLocaleString() : "-"}</td>
-                    <td className="p-muted">{e.end_time ? new Date(e.end_time).toLocaleString() : "-"}</td>
-                    <td style={{ display: "flex", gap: 10, paddingTop: 10, paddingBottom: 10 }}>
-                      <button className="btn btn-primary" onClick={() => updateEventStatus(e.id, "approved")}>Approve</button>
-                      <button className="btn btn-danger" onClick={() => updateEventStatus(e.id, "rejected")}>Reject</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div style={{ marginTop: 12 }} className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Start</th>
+              <th>End</th>
+              <th style={{ width: 260 }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pending.map((e) => (
+              <tr key={e.id}>
+                <td style={{ fontWeight: 950 }}>{e.title}</td>
+                <td className="p-muted">{e.start_time ? new Date(e.start_time).toLocaleString() : "-"}</td>
+                <td className="p-muted">{e.end_time ? new Date(e.end_time).toLocaleString() : "-"}</td>
+                <td style={{ display: "flex", gap: 10, paddingTop: 10, paddingBottom: 10 }}>
+                  <button className="btn btn-primary" onClick={() => updateEventStatus(e.id, "approved")}>
+                    Approve
+                  </button>
+                  <button className="btn btn-danger" onClick={() => updateEventStatus(e.id, "rejected")}>
+                    Reject
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {pending.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="p-muted">
+                  No pending events.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
       </div>
 
       <div className="hr" />
@@ -377,15 +371,15 @@ export default function AdminPage() {
       {selectedEvent ? (
         <div style={{ marginTop: 16 }}>
           <div className="notice">
-            Total registrations: <b>{regs.length}</b> • Present: <b>{presentCount}</b>
+            Total: <b>{regs.length}</b> • Present: <b>{presentCount}</b>
           </div>
 
           <div className="hr" />
 
           <div>
-            <h3 style={{ margin: 0, fontWeight: 950 }}>Upload certificate template (one time)</h3>
+            <h3 style={{ margin: 0, fontWeight: 950 }}>Upload template (PNG/JPG)</h3>
             <p className="p-muted" style={{ marginTop: 6 }}>
-              Upload PNG/JPG. Student name will be printed in the blank space when you mark Present.
+              When you mark Present, certificate will be generated automatically.
             </p>
 
             <input
@@ -399,11 +393,9 @@ export default function AdminPage() {
             />
 
             <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <span className="p-muted">
-                Template: {selectedEvent.certificate_template_path ? selectedEvent.certificate_template_path : "Not uploaded"}
-              </span>
+              <span className="p-muted">Template: {selectedEvent.certificate_template_path ?? "Not uploaded"}</span>
               <button className="btn btn-primary" disabled={bulkBusy} onClick={generateAllForPresent}>
-                {bulkBusy ? "Generating..." : "Generate for ALL Present (missing only)"}
+                {bulkBusy ? "Generating..." : "Generate for ALL Present"}
               </button>
             </div>
           </div>
@@ -431,16 +423,23 @@ export default function AdminPage() {
                       </button>
                     </td>
                     <td>
-                      {r.certificate_path ? <span className="badge badge-ok">Generated</span> : <span className="badge">Not generated</span>}
+                      {r.certificate_path ? (
+                        <span className="badge badge-ok">Generated</span>
+                      ) : (
+                        <span className="badge">Not generated</span>
+                      )}
                     </td>
                   </tr>
                 ))}
+                {regs.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-muted">
+                      No registrations found for this event.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
-          </div>
-
-          <div className="p-muted" style={{ marginTop: 10 }}>
-            If the name is not exactly in the blank space, tell me “move up/down/left/right”, I’ll give exact numbers to change.
           </div>
         </div>
       ) : null}
