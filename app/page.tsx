@@ -1,69 +1,162 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { supabase } from "@/lib/supabase";
+import RegisterModal from "@/components/RegisterModal";
+
+type EventRow = {
+  id: number;
+  title: string;
+  venue: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  capacity: number | null;
+  status: string | null;
+};
+
+export default function HomePage() {
+  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL ?? "";
+
+  const [events, setEvents] = useState<EventRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [userId, setUserId] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
+
+  const isAdmin = useMemo(() => !!email && !!adminEmail && email === adminEmail, [email, adminEmail]);
+
+  const [registeredEventIds, setRegisteredEventIds] = useState<number[]>([]);
+  const registeredSet = useMemo(() => new Set(registeredEventIds), [registeredEventIds]);
+
+  const [regEvent, setRegEvent] = useState<{ id: number; title: string } | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+
+    const { data: uRes } = await supabase.auth.getUser();
+    const user = uRes.user;
+    setUserId(user?.id ?? null);
+    setEmail(user?.email ?? null);
+
+    const ev = await supabase
+      .from("events")
+      .select("id,title,venue,start_time,end_time,capacity,status")
+      .eq("status", "approved")
+      .order("start_time", { ascending: true });
+
+    if (ev.error) {
+      alert(ev.error.message);
+      setEvents([]);
+      setLoading(false);
+      return;
+    }
+    setEvents((ev.data as EventRow[]) ?? []);
+
+    // load registrations only if NOT admin
+    if (user && !(user.email === adminEmail)) {
+      const regs = await supabase
+        .from("registrations")
+        .select("event_id")
+        .eq("user_id", user.id);
+
+      if (regs.error) {
+        alert(regs.error.message);
+        setRegisteredEventIds([]);
+      } else {
+        setRegisteredEventIds(((regs.data ?? []) as { event_id: number }[]).map((r) => r.event_id));
+      }
+    } else {
+      setRegisteredEventIds([]);
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    load();
+    const { data: sub } = supabase.auth.onAuthStateChange(() => load());
+    return () => sub.subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onRegisteredDone = () => {
+    if (regEvent?.id) {
+      setRegisteredEventIds((prev) => (prev.includes(regEvent.id) ? prev : [...prev, regEvent.id]));
+    }
+    setRegEvent(null);
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="card card-pad">
+      <div className="page-head">
+        <div className="page-meta">
+          <h1 className="h1">Campus Events</h1>
+          <p className="p-muted">Approved events are shown here.</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <div className="page-actions">
+          <Link className="btn" href="/create">Create event</Link>
+          <Link className="btn btn-primary" href="/my-registrations">My registrations</Link>
         </div>
-      </main>
+      </div>
+
+      <div className="hr" />
+
+      {loading ? (
+        <div className="notice">Loading events...</div>
+      ) : events.length === 0 ? (
+        <div className="notice">No approved events yet.</div>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Venue</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Capacity</th>
+                <th style={{ width: 220 }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((e) => {
+                const isRegistered = registeredSet.has(e.id);
+
+                return (
+                  <tr key={e.id}>
+                    <td style={{ fontWeight: 950 }}>{e.title}</td>
+                    <td className="p-muted">{e.venue ?? "-"}</td>
+                    <td className="p-muted">{e.start_time ? new Date(e.start_time).toLocaleString() : "-"}</td>
+                    <td className="p-muted">{e.end_time ? new Date(e.end_time).toLocaleString() : "-"}</td>
+                    <td className="p-muted">{e.capacity ?? "-"}</td>
+                    <td>
+                      {!userId ? (
+                        <Link className="btn btn-primary" href="/login">Login to register</Link>
+                      ) : isAdmin ? (
+                        <button className="btn" disabled>Admin cannot register</button>
+                      ) : isRegistered ? (
+                        <button className="btn" disabled>Registered</button>
+                      ) : (
+                        <button className="btn btn-primary" onClick={() => setRegEvent({ id: e.id, title: e.title })}>
+                          Register
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <RegisterModal
+        open={!!regEvent}
+        event={regEvent}
+        onClose={() => setRegEvent(null)}
+        onDone={onRegisteredDone}
+      />
     </div>
   );
 }
